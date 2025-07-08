@@ -1,33 +1,96 @@
-import requests
 import streamlit as st
-import os
-import json
+import requests
 import time
+import json
+from pathlib import Path
 
-
+# === Constants ===
 OLLAMA_URL = "http://localhost:11434/api/chat"
 AVAILABLE_MODELS = ["llama3", "llama2", "mistral", "phi"]
-LOGS_DIR = "chat_logs"
-os.makedirs(LOGS_DIR, exist_ok=True)
+LOGS_DIR = Path("chat_logs")
+LOGS_DIR.mkdir(exist_ok=True)
 
-# Initialize session state variables before any UI
+# Roles
+USER = "user"
+BOT = "assistant"
+SYSTEM = "system"
+
+# === Helpers ===
+def log_error(err_msg):
+    with open("error.log", "a", encoding="utf-8") as f:
+        f.write(f"{time.ctime()}: {err_msg}\n")
+
+def find_log_file_by_messages(messages):
+    for path in LOGS_DIR.glob("*.json"):
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data.get("messages") == messages:
+                    return path
+        except Exception as e:
+            log_error(str(e))
+    return None
+
+def save_chat_to_log(chat_name, messages):
+    log_path = LOGS_DIR / f"chat_{int(time.time())}.json"
+    log_data = {"name": chat_name, "messages": messages}
+    try:
+        with log_path.open("w", encoding="utf-8") as f:
+            json.dump(log_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log_error(str(e))
+    return log_data
+
+def load_previous_chats():
+    chats = []
+    for path in sorted(LOGS_DIR.glob("*.json"), reverse=True):
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                chats.append(json.load(f))
+        except Exception as e:
+            log_error(str(e))
+    return chats
+
+def get_bot_reply(conversation, model, temperature, system_prompt):
+    messages = conversation.copy()
+    if not messages or messages[0]["role"] != SYSTEM:
+        messages = [{"role": SYSTEM, "content": system_prompt}] + messages
+    payload = {
+        "model": model,
+        "messages": messages,
+        "options": {"temperature": temperature},
+    }
+    try:
+        response = requests.post(OLLAMA_URL, json=payload, timeout=60, stream=True)
+        response.raise_for_status()
+        bot_reply = ""
+        for line in response.iter_lines(decode_unicode=True):
+            if line.strip():
+                try:
+                    data = json.loads(line)
+                    content = data.get("message", {}).get("content", "")
+                    bot_reply += content
+                except Exception as e:
+                    log_error(str(e))
+        return bot_reply.strip()
+    except Exception as e:
+        return f"[Error: {e}]"
+
+# === App State ===
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
 if "usage_stats" not in st.session_state:
     st.session_state.usage_stats = {"total_chats": 0, "total_messages": 0}
 if "previous_chats" not in st.session_state:
-    st.session_state.previous_chats = []
-    for fname in sorted(os.listdir(LOGS_DIR), reverse=True):
-        if fname.endswith(".json"):
-            try:
-                with open(os.path.join(LOGS_DIR, fname), "r", encoding="utf-8") as f:
-                    st.session_state.previous_chats.append(json.load(f))
-            except Exception:
-                continue
+    st.session_state.previous_chats = load_previous_chats()
 if "current_chat_name" not in st.session_state:
     st.session_state.current_chat_name = "New Chat"
 
-# Theme toggle
+# === UI Setup ===
+st.set_page_config(page_title="Ollama Chatbot", page_icon="🤖", layout="wide")
+st.title(f"🤖 AI Chatbot (Ollama) - {st.session_state.current_chat_name}")
+
+# === Theme ===
 theme = st.sidebar.radio("Theme", ["Light", "Dark", "Auto"], index=2)
 if theme == "Dark":
     st.markdown("""
@@ -43,36 +106,39 @@ elif theme == "Light":
         </style>
     """, unsafe_allow_html=True)
 
-
-
-# Sidebar controls
+# === Sidebar ===
 with st.sidebar:
     st.header("Settings")
     model = st.selectbox("Model", AVAILABLE_MODELS, index=0)
     temperature = st.slider("Temperature (creativity)", 0.0, 1.5, 0.7, 0.05)
     system_prompt = st.text_area("System prompt (bot personality/instructions)", "You are a helpful AI assistant.")
     st.markdown("---")
+
     if st.button("Clear chat/history", type="primary"):
         if st.session_state.conversation:
-            log_path = os.path.join(LOGS_DIR, f"chat_{int(time.time())}.json")
-            chat_name = st.session_state.get("current_chat_name", f"Chat {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            log_data = {"name": chat_name, "messages": st.session_state.conversation}
-            with open(log_path, "w", encoding="utf-8") as f:
-                json.dump(log_data, f, ensure_ascii=False, indent=2)
+            log_data = save_chat_to_log(
+                st.session_state.get("current_chat_name"),
+                st.session_state.conversation
+            )
             st.session_state.usage_stats["total_chats"] += 1
             st.session_state.usage_stats["total_messages"] += len(st.session_state.conversation)
             st.session_state.previous_chats.insert(0, log_data)
         st.session_state.conversation = []
         st.session_state.current_chat_name = "New Chat"
+
     chat_text = "\n".join([
-        f"You: {msg['content']}" if msg["role"] == "user" else f"Bot: {msg['content']}" for msg in st.session_state.get("conversation", [])
+        f"You: {msg['content']}" if msg["role"] == USER else f"Bot: {msg['content']}"
+        for msg in st.session_state.conversation
     ])
     if st.session_state.conversation:
         st.download_button("Download chat as .txt", chat_text, file_name="chat_history.txt")
     else:
         st.info("No chat history to download.")
-    st.markdown(f"**Total chats:** {st.session_state.usage_stats['total_chats']}  ")
+
+    st.subheader("Stats")
+    st.markdown(f"**Total chats:** {st.session_state.usage_stats['total_chats']}")
     st.markdown(f"**Total messages:** {st.session_state.usage_stats['total_messages']}")
+
     if st.session_state.previous_chats:
         st.markdown("---")
         st.subheader("Previous Chats")
@@ -82,95 +148,43 @@ with st.sidebar:
                 new_name = st.text_input(f"Rename chat {idx+1}", value=chat_name, key=f"rename_{idx}")
                 if new_name != chat_name:
                     chat["name"] = new_name
-                    # Also update the file if it exists
-                    for fname in os.listdir(LOGS_DIR):
-                        if fname.endswith(".json"):
-                            with open(os.path.join(LOGS_DIR, fname), "r", encoding="utf-8") as f:
-                                try:
-                                    file_data = json.load(f)
-                                    if file_data.get("messages") == chat["messages"]:
-                                        file_data["name"] = new_name
-                                        with open(os.path.join(LOGS_DIR, fname), "w", encoding="utf-8") as fw:
-                                            json.dump(file_data, fw, ensure_ascii=False, indent=2)
-                                except Exception:
-                                    continue
-                if st.button(f"Load chat {idx+1}"):
+                    path = find_log_file_by_messages(chat["messages"])
+                    if path:
+                        with path.open("r", encoding="utf-8") as f:
+                            file_data = json.load(f)
+                        file_data["name"] = new_name
+                        with path.open("w", encoding="utf-8") as fw:
+                            json.dump(file_data, fw, ensure_ascii=False, indent=2)
+                if st.button(f"Load chat {idx+1}", key=f"load_{idx}"):
                     st.session_state.conversation = chat["messages"].copy()
                     st.session_state.current_chat_name = chat["name"]
                     st.rerun()
-                if st.button(f"Delete chat {idx+1}"):
-                    # Remove from previous_chats and delete file
+                if st.button(f"Delete chat {idx+1}", key=f"delete_{idx}"):
                     st.session_state.previous_chats.pop(idx)
-                    for fname in os.listdir(LOGS_DIR):
-                        if fname.endswith(".json"):
-                            with open(os.path.join(LOGS_DIR, fname), "r", encoding="utf-8") as f:
-                                try:
-                                    file_data = json.load(f)
-                                    if file_data.get("messages") == chat["messages"]:
-                                        os.remove(os.path.join(LOGS_DIR, fname))
-                                        break
-                                except Exception:
-                                    continue
+                    path = find_log_file_by_messages(chat["messages"])
+                    if path:
+                        path.unlink()
                     st.rerun()
 
-# Define get_bot_reply before any UI or chat logic
-
-def get_bot_reply(conversation, model, temperature, system_prompt):
-    # Insert system prompt as the first message if not already present
-    messages = conversation.copy()
-    if not messages or messages[0]["role"] != "system":
-        messages = [{"role": "system", "content": system_prompt}] + messages
-    payload = {
-        "model": model,
-        "messages": messages,
-        "options": {"temperature": temperature}
-    }
-    try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=60, stream=True)
-        response.raise_for_status()
-        bot_reply = ""
-        for line in response.iter_lines(decode_unicode=True):
-            if not line.strip():
-                continue
-            data = None
-            try:
-                data = __import__('json').loads(line)
-            except Exception:
-                continue
-            content = data.get("message", {}).get("content", "")
-            if content:
-                bot_reply += content
-        return bot_reply.strip()
-    except Exception as e:
-        return f"[Error: {e}]"
-
-st.set_page_config(page_title="Ollama Chatbot", page_icon="🤖", layout="wide")
-
-st.title(f"🤖 AI Chatbot (Ollama) - {st.session_state.current_chat_name}")
-
-# Display chat using Streamlit's built-in chat components
+# === Main Chat Window ===
 for msg in st.session_state.conversation:
-    if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.markdown(msg["content"])
-    else:
-        with st.chat_message("assistant"):
-            st.markdown(msg["content"])
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
 user_input = st.chat_input("Type your message...")
 if user_input:
-    st.session_state.conversation.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
+    st.session_state.conversation.append({"role": USER, "content": user_input})
+    with st.chat_message(USER):
         st.markdown(user_input)
-    # Typing indicator and smooth reveal
-    with st.chat_message("assistant"):
-        typing_placeholder = st.empty()
-        typing_placeholder.markdown("_Bot is typing..._", unsafe_allow_html=True)
+
+    with st.chat_message(BOT):
+        placeholder = st.empty()
+        placeholder.markdown("_Bot is typing..._")
         bot_reply = get_bot_reply(st.session_state.conversation, model, temperature, system_prompt)
-        # Typing animation: reveal one character at a time
         displayed = ""
         for char in bot_reply:
             displayed += char
-            typing_placeholder.markdown(displayed, unsafe_allow_html=True)
-            time.sleep(0.005)  # Adjust speed as desired
-    st.session_state.conversation.append({"role": "assistant", "content": bot_reply})
+            placeholder.markdown(displayed)
+            time.sleep(0.005)
+
+    st.session_state.conversation.append({"role": BOT, "content": bot_reply})
