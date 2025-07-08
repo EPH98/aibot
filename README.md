@@ -55,17 +55,29 @@ The app will open in your browser at http://localhost:8501
 ### Option 1: Streamlit Desktop (Recommended)
 - Use [Streamlit Desktop](https://github.com/streamlit/streamlit-desktop) for a native app feel. Follow their instructions to wrap this app.
 
-### Option 2: PyInstaller (Windows, Automated)
-1. Run the provided PowerShell script:
+### Option 2: PyInstaller (Windows, Mac, Linux)
+
+#### Windows (PowerShell)
+1. Run:
    ```powershell
    ./package_app.ps1
    ```
-   This will create a standalone executable in the `dist` folder.
-2. Double-click the generated `.exe` to launch the app. It will start Streamlit and open your browser automatically.
+2. Find your `.exe` in the `dist` folder and double-click to launch.
+
+#### Mac/Linux (Bash)
+1. Make the script executable:
+   ```bash
+   chmod +x package_app.sh
+   ./package_app.sh
+   ```
+2. Find your executable in the `dist` folder and run it:
+   ```bash
+   ./dist/desktop_launcher
+   ```
 
 **Note:**
 - The app uses `desktop_launcher.py` as the entry point for packaging.
-- For Mac/Linux, adapt the script or use Streamlit Desktop.
+- For best results on Mac/Linux, run from a terminal. Use Streamlit Desktop for a more native feel if desired.
 
 ---
 
