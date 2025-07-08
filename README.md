@@ -60,15 +60,15 @@ The app will open in your browser at http://localhost:8501
 #### Windows (PowerShell)
 1. Run:
    ```powershell
-   ./package_app.ps1
+   ./packaging/package_app.ps1
    ```
 2. Find your `.exe` in the `dist` folder and double-click to launch.
 
 #### Mac/Linux (Bash)
 1. Make the script executable:
    ```bash
-   chmod +x package_app.sh
-   ./package_app.sh
+   chmod +x packaging/package_app.sh
+   ./packaging/package_app.sh
    ```
 2. Find your executable in the `dist` folder and run it:
    ```bash
@@ -76,7 +76,7 @@ The app will open in your browser at http://localhost:8501
    ```
 
 **Note:**
-- The app uses `desktop_launcher.py` as the entry point for packaging.
+- The app uses `packaging/desktop_launcher.py` as the entry point for packaging.
 - For best results on Mac/Linux, run from a terminal. Use Streamlit Desktop for a more native feel if desired.
 
 ---

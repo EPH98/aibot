@@ -1,55 +1,17 @@
+
+
 import streamlit as st
-import requests
 import time
 import json
-from pathlib import Path
-
-# === Constants ===
-OLLAMA_URL = "http://localhost:11434/api/chat"
-AVAILABLE_MODELS = ["llama3", "llama2", "mistral", "phi"]
-LOGS_DIR = Path("chat_logs")
-LOGS_DIR.mkdir(exist_ok=True)
-
-# Roles
-USER = "user"
-BOT = "assistant"
-SYSTEM = "system"
-
-# === Helpers ===
-def log_error(err_msg):
-    with open("error.log", "a", encoding="utf-8") as f:
-        f.write(f"{time.ctime()}: {err_msg}\n")
-
-def find_log_file_by_messages(messages):
-    for path in LOGS_DIR.glob("*.json"):
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-                if data.get("messages") == messages:
-                    return path
-        except Exception as e:
-            log_error(str(e))
-    return None
-
-def save_chat_to_log(chat_name, messages):
-    log_path = LOGS_DIR / f"chat_{int(time.time())}.json"
-    log_data = {"name": chat_name, "messages": messages}
-    try:
-        with log_path.open("w", encoding="utf-8") as f:
-            json.dump(log_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log_error(str(e))
-    return log_data
-
-def load_previous_chats():
-    chats = []
-    for path in sorted(LOGS_DIR.glob("*.json"), reverse=True):
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                chats.append(json.load(f))
-        except Exception as e:
-            log_error(str(e))
-    return chats
+import requests
+from utils.chat_helpers import (
+    log_error,
+    find_log_file_by_messages,
+    save_chat_to_log,
+    load_previous_chats
+)
+from utils.ollama_helpers import get_bot_reply, check_ollama_status
+from utils.constants import OLLAMA_URL, AVAILABLE_MODELS, USER, BOT, SYSTEM, __version__
 
 def get_bot_reply(conversation, model, temperature, system_prompt):
     messages = conversation.copy()
@@ -88,26 +50,17 @@ if "current_chat_name" not in st.session_state:
 if "ollama_status" not in st.session_state:
     st.session_state.ollama_status = None
 
-# === Ollama Status Check ===
-def check_ollama_status():
-    try:
-        r = requests.get("http://localhost:11434/api/tags", timeout=2)
-        if r.status_code == 200:
-            return True
-    except Exception:
-        pass
-    return False
 
 ollama_ok = check_ollama_status()
 st.session_state.ollama_status = ollama_ok
 
 # === UI Setup ===
+st.title(f"🤖 AI Chatbot (Ollama) - {st.session_state.current_chat_name}")
 st.set_page_config(page_title="Ollama Chatbot", page_icon="🤖", layout="wide")
+st.markdown(f"<small>Version: {__version__}</small>", unsafe_allow_html=True)
 
 if not ollama_ok:
     st.error("⚠️ Ollama server is not running! Please start Ollama (run `ollama serve`) and ensure your models are available.")
-
-st.title(f"🤖 AI Chatbot (Ollama) - {st.session_state.current_chat_name}")
 
 # === Theme ===
 theme = st.sidebar.radio("Theme", ["Light", "Dark", "Auto"], index=2)
@@ -215,10 +168,12 @@ if user_input:
         placeholder = st.empty()
         placeholder.markdown("_Bot is typing..._")
         bot_reply = get_bot_reply(st.session_state.conversation, model, temperature, system_prompt)
-        displayed = ""
-        for char in bot_reply:
-            displayed += char
-            placeholder.markdown(displayed)
-            time.sleep(0.005)
-
-    st.session_state.conversation.append({"role": BOT, "content": bot_reply})
+        if bot_reply.startswith("[Error:"):
+            placeholder.error(bot_reply)
+        else:
+            displayed = ""
+            for char in bot_reply:
+                displayed += char
+                placeholder.markdown(displayed)
+                time.sleep(0.005)
+        st.session_state.conversation.append({"role": BOT, "content": bot_reply})
