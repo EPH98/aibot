@@ -85,9 +85,28 @@ if "previous_chats" not in st.session_state:
     st.session_state.previous_chats = load_previous_chats()
 if "current_chat_name" not in st.session_state:
     st.session_state.current_chat_name = "New Chat"
+if "ollama_status" not in st.session_state:
+    st.session_state.ollama_status = None
+
+# === Ollama Status Check ===
+def check_ollama_status():
+    try:
+        r = requests.get("http://localhost:11434/api/tags", timeout=2)
+        if r.status_code == 200:
+            return True
+    except Exception:
+        pass
+    return False
+
+ollama_ok = check_ollama_status()
+st.session_state.ollama_status = ollama_ok
 
 # === UI Setup ===
 st.set_page_config(page_title="Ollama Chatbot", page_icon="🤖", layout="wide")
+
+if not ollama_ok:
+    st.error("⚠️ Ollama server is not running! Please start Ollama (run `ollama serve`) and ensure your models are available.")
+
 st.title(f"🤖 AI Chatbot (Ollama) - {st.session_state.current_chat_name}")
 
 # === Theme ===
@@ -113,6 +132,21 @@ with st.sidebar:
     temperature = st.slider("Temperature (creativity)", 0.0, 1.5, 0.7, 0.05)
     system_prompt = st.text_area("System prompt (bot personality/instructions)", "You are a helpful AI assistant.")
     st.markdown("---")
+
+
+    # --- Save chat button ---
+    if st.button("Save chat", type="secondary"):
+        if st.session_state.conversation:
+            log_data = save_chat_to_log(
+                st.session_state.get("current_chat_name"),
+                st.session_state.conversation
+            )
+            st.session_state.usage_stats["total_chats"] += 1
+            st.session_state.usage_stats["total_messages"] += len(st.session_state.conversation)
+            st.session_state.previous_chats.insert(0, log_data)
+            st.success("Chat saved!")
+        else:
+            st.info("No conversation to save.")
 
     if st.button("Clear chat/history", type="primary"):
         if st.session_state.conversation:
